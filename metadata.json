@@ -1,0 +1,7 @@
+{
+  "name": "Wearly: AI Wardrobe Assistant",
+  "description": "A chat-style AI wardrobe assistant that provides clothing recommendations based on weather, user preferences, and even photos. Users can set their region to get weather-specific advice automatically.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
