@@ -1,20 +1,18 @@
-
-
 import React, { useState, useRef, useEffect, useCallback, ChangeEvent } from 'react';
 import type { Message, Gender, Tone } from './types';
 import { REGIONS } from './constants';
-import { getWeatherAndRecommendation, getTextRecommendation, getImageRecommendation, generateOutfitImage, getRegionFromCoords, generateOutfitFromLikedImages, getAlternativeOutfitSuggestion } from './services/geminiService';
+import { getWeather, type WeatherData } from './services/weatherService';
+import { generateWeatherBasedRecommendation, getTextRecommendation, getImageRecommendation, generateOutfitImage, getRegionFromCoords, generateOutfitFromLikedImages, getAlternativeOutfitSuggestion } from './services/geminiService';
 
 const initialMessage: Message = {
   id: 1,
   role: 'assistant',
-  // FIX: Switched to double quotes to fix syntax error with inner single quotes.
-  text: "안녕하세요! 저는 웨어리예요. '설정'에서 지역, 성별, 말투를 선택하시거나, 위치 정보 제공에 동의하시면 날씨에 딱 맞는 코디를 추천해드릴게요!"
+  text: "안녕하세요! '웨어리'예요. 서울 날씨에 맞춰 옷차림을 추천해 드릴게요. 다른 지역은 '설정'에서 변경할 수 있어요."
 };
 
 // --- Tone-specific Message Helpers ---
 
-const getWeatherReportMessage = (tone: Tone, region: string, data: { summary: string, minTemp: number, maxTemp: number }): string => {
+const getWeatherReportMessage = (tone: Tone, region: string, data: WeatherData): string => {
   switch (tone) {
     case 'critical':
       return `${region} 날씨. ${data.summary}. 최저 ${data.minTemp}°C, 최고 ${data.maxTemp}°C. 됐지?`;
@@ -158,6 +156,28 @@ const getWeatherProgressMessages = (tone: Tone, region: string): { text: string;
   }
 };
 
+interface PermissionModalProps {
+  title: string;
+  message: string;
+  onAllow: () => void;
+  onCancel: () => void;
+}
+
+const PermissionModal: React.FC<PermissionModalProps> = ({ title, message, onAllow, onCancel }) => {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60] backdrop-blur-sm animate-fade-in">
+      <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-2xl dark:bg-gray-800">
+        <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-2">{title}</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">{message}</p>
+        <div className="flex justify-end gap-3">
+          <button onClick={onCancel} className="px-4 py-2 rounded-xl bg-white border border-gray-300 hover:bg-gray-50 text-sm font-medium transition-all dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-600">취소</button>
+          <button onClick={onAllow} className="px-4 py-2 rounded-xl bg-purple-600 text-white font-medium shadow-lg hover:bg-purple-700 transition-all">허용</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 
 interface SettingsModalProps {
   currentRegion: string;
@@ -177,14 +197,15 @@ interface SettingsModalProps {
     height: string, 
     weight: string 
   }) => void;
+  onRequestPermission: (type: 'location', onConfirm: () => void) => void;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ 
   currentRegion, currentGender, currentTone, currentColors, 
   currentProfileImage, currentHeight, currentWeight,
-  onClose, onApply 
+  onClose, onApply, onRequestPermission
 }) => {
-  const [selectedRegion, setSelectedRegion] = useState(currentRegion);
+  const [selectedRegion, setSelectedRegion] = useState(currentRegion || '서울');
   const [selectedGender, setSelectedGender] = useState(currentGender);
   const [selectedTone, setSelectedTone] = useState(currentTone);
   const [selectedColors, setSelectedColors] = useState(currentColors);
@@ -260,30 +281,34 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleGetCurrentLocation = useCallback(() => {
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          const region = await getRegionFromCoords(latitude, longitude);
-          if (region) {
-            setSelectedRegion(region);
-          } else {
-            alert('현재 위치의 지역을 찾을 수 없습니다. 직접 선택해주세요.');
+    const performGeolocation = () => {
+      setIsLocating(true);
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            const { latitude, longitude } = position.coords;
+            const region = await getRegionFromCoords(latitude, longitude);
+            if (region) {
+              setSelectedRegion(region);
+            } else {
+              alert('현재 위치의 지역을 찾을 수 없습니다. 직접 선택해주세요.');
+            }
+          } catch (error) {
+             alert('지역을 변환하는 중 오류가 발생했습니다.');
+          } finally {
+            setIsLocating(false);
           }
-        } catch (error) {
-           alert('지역을 변환하는 중 오류가 발생했습니다.');
-        } finally {
+        },
+        (error) => {
+          alert('위치 정보를 가져올 수 없습니다. 브라우저 설정을 확인해주세요.');
           setIsLocating(false);
-        }
-      },
-      (error) => {
-        alert('위치 정보를 가져올 수 없습니다. 브라우저 설정을 확인해주세요.');
-        setIsLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  }, []);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    };
+
+    onRequestPermission('location', performGeolocation);
+  }, [onRequestPermission]);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center p-4 z-50 backdrop-blur-sm">
@@ -669,8 +694,47 @@ const fileToDataURL = (file: File): Promise<string> => {
   });
 };
 
+const LandingPage: React.FC<{ onStart: () => void }> = ({ onStart }) => {
+  return (
+    <div className="h-full w-full flex flex-col items-center justify-center text-center p-8 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-100 dark:from-gray-900 dark:via-purple-900/50 dark:to-black">
+      <div className="w-20 h-20 mb-6 rounded-full bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-5xl shadow-2xl">
+        W
+      </div>
+      <h1 className="text-4xl font-bold text-gray-800 dark:text-gray-100 mb-2">
+        내 손안의 AI 코디네이터, 웨어리
+      </h1>
+      <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-md">
+        오늘 뭐 입을지 고민될 땐? 웨어리에게 물어보세요. 날씨, 취향, TPO에 딱 맞는 스타일을 찾아드려요.
+      </p>
+      <button 
+        onClick={onStart}
+        className="px-8 py-4 rounded-xl bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 text-white font-semibold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300"
+      >
+        채팅하기
+      </button>
+
+      <div className="mt-16 flex flex-col sm:flex-row gap-8 text-gray-700 dark:text-gray-300">
+        <div className="flex flex-col items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+            <p className="font-medium">날씨 기반 추천</p>
+        </div>
+        <div className="flex flex-col items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            <p className="font-medium">사진으로 코디 분석</p>
+        </div>
+        <div className="flex flex-col items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
+            <p className="font-medium">나만의 스타일 찾기</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
 const App: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([initialMessage]);
+  const [appState, setAppState] = useState<'landing' | 'chat'>('landing');
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [region, setRegion] = useState('');
@@ -686,11 +750,25 @@ const App: React.FC = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [lastOutfitSuggestion, setLastOutfitSuggestion] = useState<string>('');
   const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
+  const [permissionRequest, setPermissionRequest] = useState<{ type: 'location', onConfirm: () => void } | null>(null);
+
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatListRef = useRef<HTMLDivElement>(null);
-  const messageIdCounter = useRef(initialMessage.id);
+  const messageIdCounter = useRef(0);
 
-  // --- Dark Mode Logic ---
+  const getNewMessageId = useCallback(() => {
+    messageIdCounter.current += 1;
+    return messageIdCounter.current;
+  }, []);
+
+  const addMessage = useCallback((role: 'user' | 'assistant', text: string, image?: string, generatedImage?: string, loadingImage?: boolean): number => {
+    const newId = getNewMessageId();
+    const newMessage: Message = { id: newId, role, text, image, generatedImage, loadingImage, feedback: null };
+    setMessages(prev => [...prev, newMessage]);
+    return newId;
+  }, [getNewMessageId]);
+  
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
@@ -710,17 +788,41 @@ const App: React.FC = () => {
     }
   }, [isDarkMode]);
 
-  const getNewMessageId = useCallback(() => {
-    messageIdCounter.current += 1;
-    return messageIdCounter.current;
-  }, []);
+  const handleGetWeatherRecommendation = useCallback(async (newRegion: string, newGender: Gender, newTone: Tone, newColors: string[], newHeight: string, newWeight: string) => {
+    setQuickReplies([]);
+    setIsLoading(true);
+    const placeholderId = addMessage('assistant', '...');
 
-  const addMessage = useCallback((role: 'user' | 'assistant', text: string, image?: string, generatedImage?: string, loadingImage?: boolean): number => {
-    const newId = getNewMessageId();
-    const newMessage: Message = { id: newId, role, text, image, generatedImage, loadingImage, feedback: null };
-    setMessages(prev => [...prev, newMessage]);
-    return newId;
-  }, [getNewMessageId]);
+    const progressSteps = getWeatherProgressMessages(newTone, newRegion);
+
+    try {
+        for (const step of progressSteps) {
+            setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: step.text } : m));
+            if (step.delay > 0) {
+                await new Promise(resolve => setTimeout(resolve, step.delay));
+            }
+        }
+
+        const weatherData = await getWeather(newRegion);
+        const weatherText = getWeatherReportMessage(newTone, newRegion, weatherData);
+        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: weatherText } : m));
+
+        const recommendationData = await generateWeatherBasedRecommendation(weatherData, newRegion, newGender, newTone, newColors, newHeight, newWeight);
+        setLastOutfitSuggestion(recommendationData.suggestion);
+        
+        const combinedText = `${weatherText}\n\n${recommendationData.suggestion}`;
+        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: combinedText } : m));
+        
+        setQuickReplies(['코디 이미지 보여줘', '활동량 많은 날엔?', '저녁 약속엔 뭐 입지?']);
+
+    } catch (e) {
+        const error = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
+        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: getWeatherErrorMessage(newTone, error) } : m));
+        setQuickReplies(['다시 시도']);
+    } finally {
+        setIsLoading(false);
+    }
+  }, [addMessage]);
   
   const handleSettingsApply = useCallback(async (settings: { 
     region: string, 
@@ -743,24 +845,8 @@ const App: React.FC = () => {
         weight: newWeight,
     } = settings;
 
+    const isFirstTime = appState === 'landing';
     const regionChanged = newRegion !== region;
-    const genderChanged = newGender !== gender;
-    const toneChanged = newTone !== tone;
-    const colorsChanged = JSON.stringify(newColors.sort()) !== JSON.stringify(colors.sort());
-    const physicalInfoChanged = newHeight !== height || newWeight !== weight || newProfileImage !== profileImage;
-
-    const settingsChanged = regionChanged || genderChanged || toneChanged || colorsChanged || physicalInfoChanged;
-
-    if (!settingsChanged) return;
-
-    // We'll show a user message for the settings change regardless
-    const genderText = (g: Gender) => g === 'male' ? '남성' : g === 'female' ? '여성' : '상관없음';
-    const toneText = (t: Tone) => t === 'critical' ? '까칠한 친구' : t === 'witty' ? '쾌활한 친구' : '친절한 튜터';
-    const colorsText = newColors.length > 0 ? `, 선호색: ${newColors.join(', ')}` : '';
-    const physicalInfoText = newHeight || newWeight ? `, 신체정보 변경` : '';
-    const profileImageText = newProfileImage !== profileImage ? ', 프로필 사진 변경' : '';
-    const userMessage = `설정 변경: ${newRegion}, ${genderText(newGender)}, ${toneText(newTone)}${colorsText}${physicalInfoText}${profileImageText}`;
-    addMessage('user', userMessage);
 
     setRegion(newRegion);
     setGender(newGender);
@@ -769,42 +855,36 @@ const App: React.FC = () => {
     setProfileImage(newProfileImage);
     setHeight(newHeight);
     setWeight(newWeight);
-
-    if (regionChanged) {
-        setQuickReplies([]);
-        setIsLoading(true);
-        const placeholderId = addMessage('assistant', '...');
-
-        const progressSteps = getWeatherProgressMessages(newTone, newRegion);
-
-        (async () => {
-            try {
-                for (const step of progressSteps) {
-                    setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: step.text } : m));
-                    if (step.delay > 0) {
-                        await new Promise(resolve => setTimeout(resolve, step.delay));
-                    }
-                }
-                const data = await getWeatherAndRecommendation(newRegion, newGender, newTone, newColors, newHeight, newWeight);
-                setLastOutfitSuggestion(data.suggestion);
-                const weatherText = getWeatherReportMessage(newTone, newRegion, data);
-                const combinedText = `${weatherText}\n\n${data.suggestion}`;
-                setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: combinedText, generatedImage: undefined } : m));
-                setQuickReplies(['코디 이미지 보여줘', '활동량 많은 날엔?', '저녁 약속엔 뭐 입지?']);
-            } catch (e) {
-                const error = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
-                setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: getWeatherErrorMessage(newTone, error) } : m));
-                setQuickReplies(['날씨 알려줘']);
-            } finally {
-                setIsLoading(false);
-            }
-        })();
+    
+    if (isFirstTime) {
+        setAppState('chat');
+        await handleGetWeatherRecommendation(newRegion, newGender, newTone, newColors, newHeight, newWeight);
     } else {
-        addMessage('assistant', '설정이 업데이트되었어요! 앞으로 추천에 반영할게요. 😉');
-        setQuickReplies([]);
-    }
-  }, [addMessage, region, gender, tone, colors, height, weight, profileImage]);
+        const genderChanged = newGender !== gender;
+        const toneChanged = newTone !== tone;
+        const colorsChanged = JSON.stringify(newColors.sort()) !== JSON.stringify(colors.sort());
+        const physicalInfoChanged = newHeight !== height || newWeight !== weight || newProfileImage !== profileImage;
 
+        const settingsChanged = regionChanged || genderChanged || toneChanged || colorsChanged || physicalInfoChanged;
+
+        if (!settingsChanged) return;
+
+        const genderText = (g: Gender) => g === 'male' ? '남성' : g === 'female' ? '여성' : '상관없음';
+        const toneText = (t: Tone) => t === 'critical' ? '까칠한 친구' : t === 'witty' ? '쾌활한 친구' : '친절한 튜터';
+        const colorsText = newColors.length > 0 ? `, 선호색: ${newColors.join(', ')}` : '';
+        const physicalInfoText = newHeight || newWeight ? `, 신체정보 변경` : '';
+        const profileImageText = newProfileImage !== profileImage ? ', 프로필 사진 변경' : '';
+        const userMessage = `설정 변경: ${newRegion}, ${genderText(newGender)}, ${toneText(newTone)}${colorsText}${physicalInfoText}${profileImageText}`;
+        addMessage('user', userMessage);
+
+        if (regionChanged) {
+            await handleGetWeatherRecommendation(newRegion, newGender, newTone, newColors, newHeight, newWeight);
+        } else {
+            addMessage('assistant', '설정이 업데이트되었어요! 앞으로 추천에 반영할게요. 😉');
+            setQuickReplies([]);
+        }
+    }
+  }, [addMessage, appState, region, gender, tone, colors, height, weight, profileImage, handleGetWeatherRecommendation]);
 
   useEffect(() => {
     const scrollTimeout = setTimeout(() => {
@@ -818,8 +898,13 @@ const App: React.FC = () => {
 
   const handleSend = useCallback(async (messageText?: string) => {
     const text = (messageText ?? input).trim();
+
+    if (text === '다시 시도' && region) {
+        handleGetWeatherRecommendation(region, gender, tone, colors, height, weight);
+        return;
+    }
     
-    if (!region || !tone) {
+    if (!region) {
         setSettingsOpen(true);
         return;
     }
@@ -914,7 +999,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [input, imageFile, isLoading, region, gender, tone, colors, height, weight, addMessage, lastOutfitSuggestion, profileImage]);
+  }, [input, imageFile, isLoading, region, gender, tone, colors, height, weight, addMessage, lastOutfitSuggestion, profileImage, handleGetWeatherRecommendation]);
 
   const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -963,7 +1048,7 @@ const App: React.FC = () => {
   const handleRecommendationFromHistory = useCallback(async (images: string[], source: 'selected' | 'all') => {
     setHistoryOpen(false);
     
-    if (!region || !tone) {
+    if (!region) {
         setSettingsOpen(true);
         return;
     }
@@ -1021,9 +1106,39 @@ const App: React.FC = () => {
     }
   }, [getNewMessageId, addMessage]);
 
+  const handleRequestPermission = useCallback((type: 'location', onConfirm: () => void) => {
+    setPermissionRequest({ type, onConfirm });
+  }, []);
+  
+  const resetApp = useCallback(() => {
+    setAppState('landing');
+    setMessages([]);
+    setInput('');
+    setQuickReplies([]);
+    setRegion('');
+    setGender('');
+    setTone('friendly');
+    setColors([]);
+    setLastOutfitSuggestion('');
+    setProfileImage(null);
+    setHeight('');
+    setWeight('');
+    messageIdCounter.current = 0;
+  }, []);
+
+  const permissionDetails = {
+    location: {
+      title: '위치 정보 접근 허용',
+      message: '정확한 날씨 기반 추천을 위해 사용자의 위치 정보 접근 권한이 필요합니다. 허용하시겠습니까?'
+    }
+  };
+
 
   return (
     <div className="h-screen w-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-purple-50 to-pink-100 sm:p-4 dark:from-gray-900 dark:via-purple-900/50 dark:to-black">
+      {appState === 'landing' ? (
+        <LandingPage onStart={() => setSettingsOpen(true)} />
+      ) : (
       <div className="flex flex-col w-full h-full max-w-3xl sm:rounded-2xl shadow-2xl overflow-hidden bg-white/80 backdrop-blur-lg border border-gray-200 dark:bg-gray-800/80 dark:border-gray-700">
         {/* Header */}
         <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-gray-200/80 shrink-0 dark:border-gray-700/80">
@@ -1052,7 +1167,7 @@ const App: React.FC = () => {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
             <button 
-              onClick={() => { setMessages([initialMessage]); setInput(''); setQuickReplies([]); setRegion(''); setGender(''); setTone('friendly'); setColors([]); setLastOutfitSuggestion(''); setProfileImage(null); setHeight(''); setWeight(''); }} 
+              onClick={resetApp} 
               className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 transition-colors dark:hover:bg-gray-700"
               aria-label="새로고침"
             >
@@ -1137,7 +1252,7 @@ const App: React.FC = () => {
                 </div>
               </div>
             ))}
-            {isLoading && !messages[messages.length-1].loadingImage && (
+            {isLoading && !messages[messages.length-1]?.loadingImage && (
               <div className="flex items-end gap-2 justify-start">
                   <div className="p-4 max-w-[85%] md:max-w-[75%] rounded-2xl bg-white border border-gray-200 text-gray-800 rounded-bl-lg shadow-md dark:bg-gray-700 dark:border-gray-600">
                       <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
@@ -1190,7 +1305,7 @@ const App: React.FC = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="오늘 뭐 입을지 물어보세요..."
-                className="w-full resize-none p-3 h-12 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-400 transition dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 dark:focus:ring-purple-500"
+                className="flex-1 resize-none p-3 h-12 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-400 transition dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 dark:focus:ring-purple-500"
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 disabled={isLoading}
               />
@@ -1206,6 +1321,7 @@ const App: React.FC = () => {
           </div>
         </footer>
       </div>
+      )}
       {settingsOpen && <SettingsModal 
         currentRegion={region} 
         currentGender={gender} 
@@ -1216,9 +1332,21 @@ const App: React.FC = () => {
         currentWeight={weight}
         onClose={() => setSettingsOpen(false)} 
         onApply={handleSettingsApply} 
+        onRequestPermission={handleRequestPermission}
       />}
       {historyOpen && <HistoryModal messages={messages} onClose={() => setHistoryOpen(false)} onDelete={handleDeleteLikedImage} onRecommendFromSelected={(images) => handleRecommendationFromHistory(images, 'selected')} onRecommendFromAll={(images) => handleRecommendationFromHistory(images, 'all')} onImageClick={setZoomedImageUrl} onAddImage={handleAddImageToHistory} />}
       {zoomedImageUrl && <ImageZoomModal imageUrl={zoomedImageUrl} onClose={() => setZoomedImageUrl(null)} />}
+      {permissionRequest && (
+        <PermissionModal
+            title={permissionDetails[permissionRequest.type].title}
+            message={permissionDetails[permissionRequest.type].message}
+            onAllow={() => {
+                permissionRequest.onConfirm();
+                setPermissionRequest(null);
+            }}
+            onCancel={() => setPermissionRequest(null)}
+        />
+      )}
     </div>
   );
 };

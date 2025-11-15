@@ -1,8 +1,10 @@
 
 
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import type { Gender, Tone } from '../types';
 import { REGIONS } from '../constants';
+import type { WeatherData } from './weatherService';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -182,7 +184,15 @@ Final image requirements:
   }
 }
 
-export async function getWeatherAndRecommendation(region: string, gender: Gender, tone: Tone, colors: string[], height: string, weight: string) {
+export async function generateWeatherBasedRecommendation(
+  weather: WeatherData,
+  region: string,
+  gender: Gender,
+  tone: Tone,
+  colors: string[],
+  height: string,
+  weight: string
+) {
   try {
     const genderText = getGenderPromptText(gender);
     const todayDateText = getCurrentDateText();
@@ -197,9 +207,14 @@ export async function getWeatherAndRecommendation(region: string, gender: Gender
       너는 대한민국 패션 AI '웨어리'야.
       ${todayDateText} 이건 한국 시간 기준이야.
       
+      <오늘의 날씨 정보>
+      - 지역: ${region}
+      - 날씨: ${weather.summary}
+      - 최저 기온: ${weather.minTemp}°C
+      - 최고 기온: ${weather.maxTemp}°C
+
       <미션>
-      1. **날씨 검색:** 먼저, 대한민국 '${region}'의 오늘 날씨를 실시간으로 검색해서 '최저 기온', '최고 기온', '날씨 요약'(예: 맑음, 구름 많음, 비) 정보를 알아내줘.
-      2. **옷차림 추천:** 검색한 날씨 정보를 바탕으로 ${genderText ? `${genderText}을 위한` : ''} 옷차림 추천을 생성해줘.
+      - **위의 <오늘의 날씨 정보>를 바탕으로 ${genderText ? `${genderText}을 위한` : ''} 옷차림 추천을 생성해줘.**
       - **아래의 <기온별 옷차림 가이드>를 반드시 참고해서 최저/최고 기온에 모두 적합한, 현실적이고 정확한 옷차림을 추천해야 해.**
       - 예를 들어, 최저 기온과 최고 기온의 차이(일교차)가 크면, 쉽게 입고 벗을 수 있는 가디건이나 자켓을 활용한 레이어드 스타일을 추천하는 등 스마트하게 제안해줘.
 
@@ -209,7 +224,7 @@ export async function getWeatherAndRecommendation(region: string, gender: Gender
 
       <말투 및 형식>
       - **말투:** '${personaInstruction}' 이걸 꼭 지켜줘.
-      - **출력 형식:** 다른 말은 절대 하지 말고, 반드시 아래 JSON 형식으로만 답변해. 네가 검색한 날씨 정보를 'summary', 'minTemp', 'maxTemp' 필드에 담아줘.
+      - **출력 형식:** 다른 말은 절대 하지 말고, 반드시 아래 JSON 형식으로만 답변해.
     `;
 
     const response = await ai.models.generateContent({
@@ -220,12 +235,9 @@ export async function getWeatherAndRecommendation(region: string, gender: Gender
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            summary: { type: Type.STRING, description: "검색된 오늘의 날씨 요약" },
-            minTemp: { type: Type.NUMBER, description: "검색된 오늘의 최저 기온" },
-            maxTemp: { type: Type.NUMBER, description: "검색된 오늘의 최고 기온" },
             suggestion: { type: Type.STRING, description: "오늘 날씨에 딱 맞는 옷차림 추천 문구." },
           },
-          required: ["summary", "minTemp", "maxTemp", "suggestion"],
+          required: ["suggestion"],
         },
       },
     });
@@ -234,7 +246,7 @@ export async function getWeatherAndRecommendation(region: string, gender: Gender
     return parsed;
 
   } catch (error) {
-    console.error("Error getting weather and recommendation:", error);
+    console.error("Error generating weather based recommendation:", error);
     throw new Error("날씨 기반 추천을 생성하는 데 실패했습니다. 잠시 후 다시 시도해주세요.");
   }
 }
