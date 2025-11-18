@@ -62,17 +62,53 @@ export interface WeatherData {
   summary: string;
 }
 
+// Interface for cached weather data
+interface CachedWeatherData {
+  weatherData: WeatherData;
+  region: string;
+  date: string; // YYYY-MM-DD
+}
+
+// Function to get today's date as a YYYY-MM-DD string
+const getTodayDateString = (): string => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+
 export async function getWeather(region: string): Promise<WeatherData> {
   if (!REGIONS.includes(region)) {
     throw new Error('지원되지 않는 지역입니다.');
   }
 
+  const todayDateString = getTodayDateString();
+  const cacheKey = 'wearlyWeatherDataCache';
+
+  // 1. Check for cached data
+  try {
+    const cachedItem = localStorage.getItem(cacheKey);
+    if (cachedItem) {
+      const cachedData: CachedWeatherData = JSON.parse(cachedItem);
+      // Check if cache is for today and for the correct region
+      if (cachedData.date === todayDateString && cachedData.region === region) {
+        return cachedData.weatherData;
+      }
+    }
+  } catch (error) {
+    console.error("Error reading weather cache:", error);
+    // If cache is corrupted, it will be overwritten.
+  }
+
+  // 2. If no valid cache, fetch from API
   const coords = regionCoordinates[region];
   if (!coords) {
     throw new Error('지역의 좌표를 찾을 수 없습니다.');
   }
 
-  const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Asia/Seoul`;
+  const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia/Seoul`;
 
   try {
     const response = await fetch(apiUrl);
@@ -89,8 +125,16 @@ export async function getWeather(region: string): Promise<WeatherData> {
     const weatherData: WeatherData = {
       minTemp: Math.round(today.temperature_2m_min[0]),
       maxTemp: Math.round(today.temperature_2m_max[0]),
-      summary: weatherCodeToString(today.weather_code[0]),
+      summary: weatherCodeToString(today.weathercode[0]),
     };
+
+    // 3. Store the new data in cache
+    const newCacheData: CachedWeatherData = {
+      weatherData,
+      region,
+      date: todayDateString
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(newCacheData));
     
     return weatherData;
   } catch (error) {

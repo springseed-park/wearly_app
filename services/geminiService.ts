@@ -1,6 +1,3 @@
-
-
-
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import type { Gender, Tone } from '../types';
 import { REGIONS } from '../constants';
@@ -109,6 +106,26 @@ const base64ToPart = (base64Data: string) => {
   };
 };
 
+async function isHumanFaceInImage(base64Image: string): Promise<boolean> {
+  try {
+    const imagePart = base64ToPart(base64Image);
+    const prompt = `Does this image prominently feature a human face? Your answer must be only "yes" or "no".`;
+    
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: { parts: [imagePart, { text: prompt }] },
+    });
+
+    const answer = response.text.trim().toLowerCase();
+    // Use .includes() for robustness against minor model variations
+    return answer.includes('yes');
+  } catch (error) {
+    console.error("Error analyzing image for human face:", error);
+    // On error, default to not using the image for synthesis to be safe.
+    return false;
+  }
+}
+
 export async function getRegionFromCoords(lat: number, lon: number): Promise<string | null> {
   const prompt = `
     대한민국 위도 ${lat}, 경도 ${lon}에 해당하는 지역명을 다음 리스트에서 하나만 골라줘.
@@ -144,14 +161,15 @@ export async function generateOutfitImage(description: string, gender: Gender, p
     } else if (weight) {
         physicalInfoPrompt = ` who weighs ${weight}kg`;
     }
-
-    let prompt = `A realistic, full-body fashion photo of ${genderPromptText}${physicalInfoPrompt} wearing: ${description}. Clean, minimalist studio background. Centered, photorealistic, no text or logos.`;
     
-    const parts: any[] = [];
-
+    let useProfileImageForSynthesis = false;
     if (profileImage) {
-        parts.push(base64ToPart(profileImage));
-        prompt = `Your **primary and most important task** is to generate a realistic, full-body fashion photo of a person wearing this EXACT outfit: "${description}". The clothing items, colors, and styles described must be accurately represented.
+      useProfileImageForSynthesis = await isHumanFaceInImage(profileImage);
+    }
+
+    // Use gemini-2.5-flash-image for editing (when a profile image is provided and contains a human face)
+    if (profileImage && useProfileImageForSynthesis) {
+        const prompt = `Your **primary and most important task** is to generate a realistic, full-body fashion photo of a person wearing this EXACT outfit: "${description}". The clothing items, colors, and styles described must be accurately represented.
 
 Use the attached photo of the user as a reference for the person's face and body type. The generated person should strongly resemble the user.
 
@@ -160,24 +178,48 @@ Final image requirements:
 - Composition: Centered, full-body shot.
 - Style: Photorealistic.
 - Overlays: No text or logos.`;
+        
+        const parts = [
+            base64ToPart(profileImage),
+            { text: prompt }
+        ];
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts },
+            config: {
+                responseModalities: [Modality.IMAGE],
+            },
+        });
+
+        const part = response.candidates?.[0]?.content?.parts?.[0];
+        if (part?.inlineData) {
+            const { data, mimeType } = part.inlineData;
+            return `data:${mimeType};base64,${data}`;
+        }
+        return null;
+    } 
+    // Use the powerful imagen model for pure text-to-image generation
+    else {
+        const prompt = `A realistic, full-body fashion photo of ${genderPromptText}${physicalInfoPrompt} wearing: ${description}. The person is shown from head to toe. Clean, minimalist studio background. Centered, photorealistic, no text or logos.`;
+        
+        const response = await ai.models.generateImages({
+            model: 'imagen-4.0-generate-001',
+            prompt: prompt,
+            config: {
+              numberOfImages: 1,
+              outputMimeType: 'image/jpeg',
+              aspectRatio: '9:16', // Portrait for full-body shots
+            },
+        });
+        
+        const image = response.generatedImages?.[0]?.image;
+        if (image?.imageBytes) {
+            const base64ImageBytes: string = image.imageBytes;
+            return `data:image/jpeg;base64,${base64ImageBytes}`;
+        }
+        return null;
     }
-
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: { parts },
-      config: {
-        responseModalities: [Modality.IMAGE],
-      },
-    });
-
-    const part = response.candidates?.[0]?.content?.parts?.[0];
-    if (part?.inlineData) {
-      const { data, mimeType } = part.inlineData;
-      return `data:${mimeType};base64,${data}`;
-    }
-    return null;
   } catch (error) {
     console.error("Error generating outfit image:", error);
     return null;
@@ -198,10 +240,10 @@ export async function generateWeatherBasedRecommendation(
     const todayDateText = getCurrentDateText();
 
     const personaInstruction = {
-      friendly: "이 날씨에 어울리는 옷차림을 친한 친구처럼 짧고 친근하게 존댓말로 추천해줘. 이모티콘도 좋아! 😉",
-      witty: "이 날씨에 맞춰 옷 어떻게 입을지 반말로 짧고 위트있게 알려줘. 드립 환영 ㅋㅋ",
-      critical: "이 날씨에 맞는 옷차림을 반말로 짧고 직설적으로 알려줘. 잘못 입으면 팩폭ㄱㄱ"
-    }[tone] || "오늘 날씨에 어울리는 옷차림을 친한 친구처럼 짧고 친근하게 존댓말로 추천해줘. 이모티콘도 좋아! 😉";
+      friendly: "날씨를 먼저 알려주고, 이어서 옷차림을 친한 친구처럼 짧고 친근하게 존댓말로 추천해줘. 이모티콘도 좋아! 😉",
+      witty: "오늘 날씨 어떤지 알려주고, 거기에 맞춰 옷 어떻게 입을지 반말로 짧고 위트있게 알려줘. 드립 환영 ㅋㅋ",
+      critical: "오늘 날씨 간단히 요약하고, 맞는 옷차림을 반말로 짧고 직설적으로 알려줘. 잘못 입으면 팩폭ㄱㄱ"
+    }[tone] || "날씨를 먼저 알려주고, 이어서 옷차림을 친한 친구처럼 짧고 친근하게 존댓말로 추천해줘. 이모티콘도 좋아! 😉";
 
     const prompt = `
       너는 대한민국 패션 AI '웨어리'야.
@@ -214,9 +256,9 @@ export async function generateWeatherBasedRecommendation(
       - 최고 기온: ${weather.maxTemp}°C
 
       <미션>
-      - **위의 <오늘의 날씨 정보>를 바탕으로 ${genderText ? `${genderText}을 위한` : ''} 옷차림 추천을 생성해줘.**
-      - **아래의 <기온별 옷차림 가이드>를 반드시 참고해서 최저/최고 기온에 모두 적합한, 현실적이고 정확한 옷차림을 추천해야 해.**
-      - 예를 들어, 최저 기온과 최고 기온의 차이(일교차)가 크면, 쉽게 입고 벗을 수 있는 가디건이나 자켓을 활용한 레이어드 스타일을 추천하는 등 스마트하게 제안해줘.
+      - **위의 <오늘의 날씨 정보>를 바탕으로 ${genderText ? `${genderText}을 위한` : ''} 날씨 리포트와 옷차림 추천을 하나의 메시지로 생성해줘.**
+      - **날씨 리포트:** 날씨 정보를 친근하게 요약해줘. ('weatherReport' 필드)
+      - **옷차림 추천:** 아래 <기온별 옷차림 가이드>를 반드시 참고해서 최저/최고 기온에 모두 적합한, 현실적이고 정확한 옷차림을 추천해야 해. 일교차가 크면 레이어드 스타일을 제안하는 등 스마트하게 제안해줘. ('suggestion' 필드)
 
       ${getPhysicalInfoPromptText(height, weight)}
       ${getColorPromptText(colors)}
@@ -235,9 +277,10 @@ export async function generateWeatherBasedRecommendation(
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            weatherReport: { type: Type.STRING, description: "오늘 날씨를 요약한 친근한 문구." },
             suggestion: { type: Type.STRING, description: "오늘 날씨에 딱 맞는 옷차림 추천 문구." },
           },
-          required: ["suggestion"],
+          required: ["weatherReport", "suggestion"],
         },
       },
     });
@@ -266,7 +309,8 @@ export async function getTextRecommendation(text: string, region: string | null,
     응답은 반드시 다음 JSON 형식으로! 답변은 짧고 간결하게!
     {
       "advice": "패션 조언. 아주 짧고, 강렬하고, 재밌게.",
-      "quickReplies": [ "이 코디 이미지로 보여줘", "다른 스타일 추천해줘", "신발은 뭐 신지?" ]
+      "quickReplies": [ "이 코디 이미지로 보여줘", "다른 스타일 추천해줘", "신발은 뭐 신지?" ],
+      "title": "대화의 핵심을 담은 5단어 이하의 간결한 한국어 제목. 예: '오늘 날씨 코디 추천'"
     }
   `;
   try {
@@ -284,8 +328,9 @@ export async function getTextRecommendation(text: string, region: string | null,
               items: { type: Type.STRING },
               description: '추천 후속 질문 3가지. 첫번째는 항상 "이 코디 이미지로 보여줘"여야 합니다.',
             },
+            title: { type: Type.STRING, description: '대화를 5단어 이하로 요약한 짧은 제목' },
           },
-          required: ["advice", "quickReplies"],
+          required: ["advice", "quickReplies", "title"],
         },
       },
     });
@@ -332,8 +377,9 @@ export async function getImageRecommendation(imageFile: File, text: string, regi
         ${temperatureClothingGuide}
         
         <출력 형식>
-        - 분석, 제안, 그리고 2개의 후속 질문을 포함한 JSON 형식으로만 응답해줘. 답변은 무조건 짧고 간결하게!
+        - 분석, 제안, 2개의 후속 질문, 그리고 대화 제목을 포함한 JSON 형식으로만 응답해줘. 답변은 무조건 짧고 간결하게!
         - 후속 질문(quickReplies)의 첫번째는 항상 "제안된 코디 이미지로 보여줘" 여야 해.
+        - 제목(title)은 "사진 코디 평가"와 같이 5단어 이하의 간결한 한국어 제목이어야 해.
       `
   };
   
@@ -353,8 +399,9 @@ export async function getImageRecommendation(imageFile: File, text: string, regi
               items: { type: Type.STRING },
               description: '추천 후속 질문 2가지. 첫번째는 항상 "제안된 코디 이미지로 보여줘"여야 합니다.',
             },
+            title: { type: Type.STRING, description: '대화를 5단어 이하로 요약한 짧은 제목' },
           },
-          required: ["analysis", "suggestion", "quickReplies"],
+          required: ["analysis", "suggestion", "quickReplies", "title"],
         },
       },
     });

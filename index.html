@@ -19,17 +19,16 @@
     </style>
     <script>
       // On page load or when changing themes, best to add inline in `head` to avoid FOUC.
-      // This script checks localStorage first, then falls back to system preference.
+      // This script sets the theme based on the user's system preference.
       (function() {
         try {
-          const theme = localStorage.getItem('theme');
-          if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
             document.documentElement.classList.add('dark');
           } else {
             document.documentElement.classList.remove('dark');
           }
         } catch (e) {
-          console.warn('Could not set theme from localStorage.', e);
+          console.warn('Could not set theme from system preference.', e);
         }
       })();
     </script>
@@ -46,6 +45,6 @@
 </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
+    <script type="module" src="/index.js"></script>
   </body>
 </html>

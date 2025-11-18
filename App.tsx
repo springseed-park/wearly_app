@@ -1,26 +1,20 @@
-import React, { useState, useRef, useEffect, useCallback, ChangeEvent } from 'react';
-import type { Message, Gender, Tone } from './types';
+import React, { useState, useRef, useEffect, useCallback, ChangeEvent, useMemo } from 'react';
+import type { Message, Gender, Tone, ChatSession } from './types';
 import { REGIONS } from './constants';
 import { getWeather, type WeatherData } from './services/weatherService';
 import { generateWeatherBasedRecommendation, getTextRecommendation, getImageRecommendation, generateOutfitImage, getRegionFromCoords, generateOutfitFromLikedImages, getAlternativeOutfitSuggestion } from './services/geminiService';
 
-const initialMessage: Message = {
-  id: 1,
-  role: 'assistant',
-  text: "안녕하세요! '웨어리'예요. 서울 날씨에 맞춰 옷차림을 추천해 드릴게요. 다른 지역은 '설정'에서 변경할 수 있어요."
-};
-
 // --- Tone-specific Message Helpers ---
 
-const getWeatherReportMessage = (tone: Tone, region: string, data: WeatherData): string => {
+const getWeatherProgressMessage = (tone: Tone, region: string): string => {
   switch (tone) {
     case 'critical':
-      return `${region} 날씨. ${data.summary}. 최저 ${data.minTemp}°C, 최고 ${data.maxTemp}°C. 됐지?`;
+      return `${region} 날씨 분석해서 코디 짜는 중. 기다려.`;
     case 'witty':
-      return `오늘 ${region} 날씨는 말이야~ ${data.summary}에 최저 ${data.minTemp}°C, 최고 ${data.maxTemp}°C까지 오르락내리락 할 예정! ㅋㅋ`;
+      return `오케이~ ${region} 날씨 스캔하고 스타일 뽑아내는 중! ⚡`;
     case 'friendly':
     default:
-      return `${region}의 오늘 날씨는 ${data.summary} (최저 ${data.minTemp}°C / 최고 ${data.maxTemp}°C) 예요.`;
+      return `${region}의 날씨를 분석해서 옷차림을 추천하고 있어요... 잠시만 기다려주세요! 😊`;
   }
 };
 
@@ -132,30 +126,6 @@ const getAnalysisErrorMessage = (isImage: boolean, tone: Tone, error: string): s
     }
 };
 
-const getWeatherProgressMessages = (tone: Tone, region: string): { text: string; delay: number }[] => {
-  switch (tone) {
-    case 'critical':
-      return [
-        { text: `📍 ${region}이라... 알았어.`, delay: 700 },
-        { text: `🌦️ 날씨 정보? 가져오면 될 거 아냐.`, delay: 1000 },
-        { text: `🤔 대충 보고 있으니 기다려.`, delay: 0 },
-      ];
-    case 'witty':
-      return [
-        { text: `📍 ${region}(으)로 순간이동! 슝~`, delay: 700 },
-        { text: `🌦️ 하늘에다 물어보는 중... "오늘 날씨 뭐냐!"`, delay: 1000 },
-        { text: `🤔 내 패션 AI가 열일하는 중이니 잠시만!`, delay: 0 },
-      ];
-    case 'friendly':
-    default:
-      return [
-        { text: `📍 ${region} 지역에 접속하고 있어요.`, delay: 700 },
-        { text: `🌦️ 오늘의 날씨 정보를 가져오는 중...`, delay: 1000 },
-        { text: `🤔 날씨를 분석해 코디를 짜고 있어요...`, delay: 0 },
-      ];
-  }
-};
-
 interface PermissionModalProps {
   title: string;
   message: string;
@@ -165,7 +135,7 @@ interface PermissionModalProps {
 
 const PermissionModal: React.FC<PermissionModalProps> = ({ title, message, onAllow, onCancel }) => {
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[60] backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-[80] backdrop-blur-sm animate-fade-in">
       <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-2xl dark:bg-gray-800">
         <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-2">{title}</h2>
         <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">{message}</p>
@@ -228,20 +198,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   ];
   
   const colorPalette = [
-    { name: '블랙', value: '#2F2F2F' },
+    { name: '블랙', value: '#192A3E' },
+    { name: '그레이', value: '#7F7F7F' },
     { name: '화이트', value: '#FFFFFF' },
-    { name: '그레이', value: '#808080' },
-    { name: '베이지', value: '#F5F5DC' },
-    { name: '네이비', value: '#000080' },
-    { name: '카키', value: '#C3B091' },
-    { name: '블루', value: '#ADD8E6' },
-    { name: '그린', value: '#90EE90' },
-    { name: '핑크', value: '#FFC0CB' },
-    { name: '레드', value: '#FF6347' },
+    { name: '레드', value: '#E52A2A' },
+    { name: '오렌지', value: '#F38122' },
+    { name: '옐로우', value: '#FEE55A' },
+    { name: '그린', value: '#407A34' },
+    { name: '블루', value: '#0045B8' },
+    { name: '퍼플', value: '#69358A' },
+    { name: '핑크', value: '#E5A8A8' },
   ];
 
   const lightColorsForCheckmark = [
-    '화이트', '베이지', '블루', '그린', '핑크', '레드'
+    '화이트', '레드', '오렌지', '옐로우', '핑크'
   ];
 
   const handleColorToggle = (colorName: string) => {
@@ -466,7 +436,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 className={`aspect-square rounded-full border-2 transition-all duration-200 flex items-center justify-center shadow-inner ${
                   selectedColors.includes(name)
                     ? 'ring-2 ring-offset-2 ring-purple-500 dark:ring-offset-gray-800'
-                    : value === '#FFFFFF' ? 'border-gray-300' : 'border-transparent'
+                    : name === '블랙' ? 'border-transparent dark:border-gray-400' : value === '#FFFFFF' ? 'border-gray-300' : 'border-transparent'
                 }`}
                 style={{ backgroundColor: value }}
                 aria-label={`${name} 색상 선택`}
@@ -638,13 +608,24 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ messages, onClose, onDelete
                         disabled={selectedIds.length === 0}
                         className="w-1/2 px-4 py-3 rounded-xl bg-purple-600 text-white font-medium shadow-lg hover:bg-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base"
                     >
-                        {selectedIds.length > 0 ? `선택 ${selectedIds.length}개로 추천` : '코디 선택 후 추천'}
+                        {selectedIds.length > 0 ? (
+                            <>
+                                <span className="sm:hidden">{`선택 ${selectedIds.length}개 추천`}</span>
+                                <span className="hidden sm:inline">{`선택 ${selectedIds.length}개로 추천`}</span>
+                            </>
+                        ) : (
+                            <>
+                                <span className="sm:hidden">선택 후 추천</span>
+                                <span className="hidden sm:inline">코디 선택 후 추천</span>
+                            </>
+                        )}
                     </button>
                     <button
                         onClick={handleRecommendAllClick}
                         className="w-1/2 px-4 py-3 rounded-xl bg-white border border-gray-300 text-gray-800 font-medium shadow-sm hover:bg-gray-50 transition-all dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-600 text-sm sm:text-base"
                     >
-                        전체로 추천
+                        <span className="sm:hidden">전체 추천</span>
+                        <span className="hidden sm:inline">전체로 추천</span>
                     </button>
                 </div>
             </div>
@@ -662,7 +643,7 @@ interface ImageZoomModalProps {
 const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) => {
   return (
     <div 
-      className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[60] backdrop-blur-md animate-fade-in"
+      className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[80] backdrop-blur-md animate-fade-in"
       onClick={onClose}
     >
       <div className="relative max-w-3xl max-h-[90vh]">
@@ -684,6 +665,88 @@ const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) =>
   );
 };
 
+interface ChatHistorySidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+  history: ChatSession[];
+  currentId: string | null;
+  onNewChat: () => void;
+  onSelectChat: (id: string) => void;
+  onDeleteChat: (id: string) => void;
+  onGoToHome: () => void;
+}
+
+const ChatHistorySidebar: React.FC<ChatHistorySidebarProps> = ({ isOpen, onClose, history, currentId, onNewChat, onSelectChat, onDeleteChat, onGoToHome }) => {
+  return (
+    <>
+      <div
+        className={`fixed inset-0 bg-black/40 z-[60] backdrop-blur-sm transition-opacity ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        onClick={onClose}
+      />
+      <div className={`fixed top-0 left-0 bottom-0 w-72 bg-gray-50 dark:bg-gray-900 z-[70] transform transition-transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} shadow-2xl flex flex-col`}>
+        <div className="p-4 flex justify-between items-center border-b dark:border-gray-700/80 shrink-0">
+          <h2 className="font-bold text-lg text-gray-800 dark:text-gray-100">채팅 기록</h2>
+          <div className="flex items-center">
+            <button 
+              onClick={onNewChat} 
+              className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 transition-colors dark:hover:bg-gray-800"
+              aria-label="새 채팅"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            </button>
+            <button 
+              onClick={onGoToHome} 
+              className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 transition-colors dark:hover:bg-gray-800"
+              aria-label="첫 화면으로"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+              </svg>
+            </button>
+            <button 
+              onClick={onClose} 
+              className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 transition-colors dark:hover:bg-gray-800"
+              aria-label="닫기"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <nav className="p-2 flex-1 overflow-y-auto no-scrollbar">
+          {history.sort((a, b) => b.createdAt - a.createdAt).map(chat => (
+            <div key={chat.id} className="relative group">
+              <button 
+                onClick={() => onSelectChat(chat.id)} 
+                className={`w-full text-left flex items-center justify-between p-3 my-1 rounded-lg cursor-pointer transition-colors ${currentId === chat.id ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-200 font-semibold' : 'hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+              >
+                <span className="truncate pr-8">{chat.title}</span>
+              </button>
+              <button 
+                onClick={(e) => { 
+                  e.stopPropagation();
+                  if (window.confirm(`'${chat.title}' 채팅을 삭제하시겠습니까?`)) {
+                    onDeleteChat(chat.id);
+                  }
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full text-gray-500 hover:bg-red-100 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity dark:text-gray-400 dark:hover:bg-red-900/50 dark:hover:text-red-400"
+                aria-label={`'${chat.title}' 채팅 삭제`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </nav>
+      </div>
+    </>
+  );
+};
+
 
 const fileToDataURL = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -700,31 +763,33 @@ const LandingPage: React.FC<{ onStart: () => void }> = ({ onStart }) => {
       <div className="w-20 h-20 mb-6 rounded-full bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-5xl shadow-2xl">
         W
       </div>
-      <h1 className="text-4xl font-bold text-gray-800 dark:text-gray-100 mb-2">
+      <h1 className="text-[1.8rem] leading-tight font-bold text-gray-800 dark:text-gray-100 mb-2">
         내 손안의 AI 코디네이터, 웨어리
       </h1>
-      <p className="text-lg text-gray-600 dark:text-gray-300 mb-8 max-w-md">
+      <p className="text-base text-gray-600 dark:text-gray-300 mb-8 max-w-md">
         오늘 뭐 입을지 고민될 땐? 웨어리에게 물어보세요. 날씨, 취향, TPO에 딱 맞는 스타일을 찾아드려요.
       </p>
-      <button 
-        onClick={onStart}
-        className="px-8 py-4 rounded-xl bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 text-white font-semibold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300"
-      >
-        채팅하기
-      </button>
+      <div className="flex justify-center w-full max-w-sm">
+        <button 
+          onClick={onStart}
+          className="w-full px-8 py-4 rounded-xl bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 text-white font-semibold text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300"
+        >
+          맞춤 코디 찾기
+        </button>
+      </div>
 
-      <div className="mt-16 flex flex-col sm:flex-row gap-8 text-gray-700 dark:text-gray-300">
-        <div className="flex flex-col items-center gap-2">
+      <div className="mt-16 grid grid-cols-3 items-start justify-center gap-4 sm:gap-8 text-gray-700 dark:text-gray-300 w-full max-w-lg">
+        <div className="flex flex-col items-center gap-2 flex-1">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-            <p className="font-medium">날씨 기반 추천</p>
+            <p className="font-medium text-sm sm:text-base">날씨 기반 추천</p>
         </div>
-        <div className="flex flex-col items-center gap-2">
+        <div className="flex flex-col items-center gap-2 flex-1">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-            <p className="font-medium">사진으로 코디 분석</p>
+            <p className="font-medium text-sm sm:text-base">사진으로 코디 분석</p>
         </div>
-        <div className="flex flex-col items-center gap-2">
+        <div className="flex flex-col items-center gap-2 flex-1">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
-            <p className="font-medium">나만의 스타일 찾기</p>
+            <p className="font-medium text-sm sm:text-base">나만의 스타일 찾기</p>
         </div>
       </div>
     </div>
@@ -734,7 +799,8 @@ const LandingPage: React.FC<{ onStart: () => void }> = ({ onStart }) => {
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<'landing' | 'chat'>('landing');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [region, setRegion] = useState('');
@@ -746,16 +812,42 @@ const App: React.FC = () => {
   const [weight, setWeight] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [quickReplies, setQuickReplies] = useState<string[]>([]);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [lastOutfitSuggestion, setLastOutfitSuggestion] = useState<string>('');
   const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
   const [permissionRequest, setPermissionRequest] = useState<{ type: 'location', onConfirm: () => void } | null>(null);
+  const [isNewChat, setIsNewChat] = useState(false);
+  const [welcomeMessageSent, setWelcomeMessageSent] = useState(false);
 
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatListRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
+  const imageGenerationTracker = useRef<{ id: number; isCancelled: boolean } | null>(null);
+
+
+  const currentChat = useMemo(() => {
+    return chatHistory.find(c => c.id === currentChatId);
+  }, [chatHistory, currentChatId]);
+
+  const currentMessages = useMemo(() => {
+    return currentChat?.messages ?? [];
+  }, [currentChat]);
+
+  const updateCurrentChat = useCallback((updater: (messages: Message[]) => Message[], action?: (chat: ChatSession) => Partial<ChatSession>) => {
+    if (!currentChatId) return;
+    setChatHistory(prevHistory =>
+      prevHistory.map(chat =>
+        chat.id === currentChatId
+          ? { ...chat, ...action?.(chat), messages: updater(chat.messages) }
+          : chat
+      )
+    );
+  }, [currentChatId]);
+
 
   const getNewMessageId = useCallback(() => {
     messageIdCounter.current += 1;
@@ -765,65 +857,126 @@ const App: React.FC = () => {
   const addMessage = useCallback((role: 'user' | 'assistant', text: string, image?: string, generatedImage?: string, loadingImage?: boolean): number => {
     const newId = getNewMessageId();
     const newMessage: Message = { id: newId, role, text, image, generatedImage, loadingImage, feedback: null };
-    setMessages(prev => [...prev, newMessage]);
+    updateCurrentChat(prevMessages => [...prevMessages, newMessage]);
     return newId;
-  }, [getNewMessageId]);
+  }, [getNewMessageId, updateCurrentChat]);
   
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme) {
-      return savedTheme === 'dark';
+  useEffect(() => {
+    // We only load user settings on startup. Chat history is now handled by landing page actions.
+    try {
+      const savedSettings = localStorage.getItem('wearlyUserSettings');
+      
+      if (savedSettings) {
+        const { region, gender, tone, colors, profileImage, height, weight } = JSON.parse(savedSettings);
+        setRegion(region ?? '');
+        setGender(gender ?? '');
+        setTone(tone ?? 'friendly');
+        setColors(colors ?? []);
+        setProfileImage(profileImage ?? null);
+        setHeight(height ?? '');
+        setWeight(weight ?? '');
+      }
+    } catch (e) {
+      console.error("Failed to load state from localStorage:", e);
     }
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
+  }, []);
 
   useEffect(() => {
-    const root = document.documentElement;
-    if (isDarkMode) {
-      root.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
-    } else {
-      root.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
+    // Save state to localStorage whenever it changes
+    if (chatHistory.length > 0) {
+      localStorage.setItem('wearlyChatHistory', JSON.stringify(chatHistory));
     }
-  }, [isDarkMode]);
+    if (currentChatId) {
+      localStorage.setItem('wearlyCurrentChatId', currentChatId);
+    }
+    const userSettings = { region, gender, tone, colors, profileImage, height, weight };
+    localStorage.setItem('wearlyUserSettings', JSON.stringify(userSettings));
+  }, [chatHistory, currentChatId, region, gender, tone, colors, profileImage, height, weight]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const listener = (e: MediaQueryListEvent) => {
+      document.documentElement.classList.toggle('dark', e.matches);
+    };
+    mediaQuery.addEventListener('change', listener);
+    return () => mediaQuery.removeEventListener('change', listener);
+  }, []);
+
+  const handleCancelImageGeneration = useCallback((messageId: number) => {
+    if (imageGenerationTracker.current?.id === messageId) {
+        imageGenerationTracker.current.isCancelled = true;
+        updateCurrentChat(prev => prev.map(m => m.id === messageId ? {
+            ...m,
+            text: '이미지 생성을 중지했어요.',
+            loadingImage: false,
+        } : m));
+        setIsLoading(false);
+        imageGenerationTracker.current = null;
+    }
+  }, [updateCurrentChat]);
 
   const handleGetWeatherRecommendation = useCallback(async (newRegion: string, newGender: Gender, newTone: Tone, newColors: string[], newHeight: string, newWeight: string) => {
     setQuickReplies([]);
     setIsLoading(true);
-    const placeholderId = addMessage('assistant', '...');
-
-    const progressSteps = getWeatherProgressMessages(newTone, newRegion);
+    const placeholderId = addMessage('assistant', getWeatherProgressMessage(newTone, newRegion));
 
     try {
-        for (const step of progressSteps) {
-            setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: step.text } : m));
-            if (step.delay > 0) {
-                await new Promise(resolve => setTimeout(resolve, step.delay));
-            }
-        }
-
         const weatherData = await getWeather(newRegion);
-        const weatherText = getWeatherReportMessage(newTone, newRegion, weatherData);
-        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: weatherText } : m));
-
         const recommendationData = await generateWeatherBasedRecommendation(weatherData, newRegion, newGender, newTone, newColors, newHeight, newWeight);
+        
         setLastOutfitSuggestion(recommendationData.suggestion);
         
-        const combinedText = `${weatherText}\n\n${recommendationData.suggestion}`;
-        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: combinedText } : m));
+        const combinedText = `${recommendationData.weatherReport}\n\n${recommendationData.suggestion}`;
+        updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? { ...m, text: combinedText } : m));
         
         setQuickReplies(['코디 이미지 보여줘', '활동량 많은 날엔?', '저녁 약속엔 뭐 입지?']);
 
     } catch (e) {
         const error = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
-        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: getWeatherErrorMessage(newTone, error) } : m));
+        updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? { ...m, text: getWeatherErrorMessage(newTone, error) } : m));
         setQuickReplies(['다시 시도']);
     } finally {
         setIsLoading(false);
     }
-  }, [addMessage]);
+  }, [addMessage, updateCurrentChat]);
   
+  const handleNewChat = useCallback(() => {
+    setIsSidebarOpen(false);
+    const now = new Date();
+    const newChatId = `chat_${now.getTime()}`;
+
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const initialTitle = `${year}.${month}.${day} ${hours}:${minutes}`;
+
+    const newChat: ChatSession = {
+      id: newChatId,
+      title: initialTitle,
+      messages: [],
+      createdAt: now.getTime(),
+    };
+    
+    setChatHistory(prev => [newChat, ...prev]);
+    setCurrentChatId(newChatId);
+    setQuickReplies([]);
+    setIsNewChat(true);
+  }, []);
+
+  useEffect(() => {
+    if (isNewChat && currentChatId) {
+      setIsNewChat(false); // Reset trigger
+      if (!region) {
+        setSettingsOpen(true);
+      } else if (!welcomeMessageSent) {
+        setWelcomeMessageSent(true);
+        handleGetWeatherRecommendation(region, gender, tone, colors, height, weight);
+      }
+    }
+  }, [isNewChat, currentChatId, region, gender, tone, colors, height, weight, handleGetWeatherRecommendation, welcomeMessageSent]);
+
   const handleSettingsApply = useCallback(async (settings: { 
     region: string, 
     gender: Gender, 
@@ -858,7 +1011,7 @@ const App: React.FC = () => {
     
     if (isFirstTime) {
         setAppState('chat');
-        await handleGetWeatherRecommendation(newRegion, newGender, newTone, newColors, newHeight, newWeight);
+        handleNewChat();
     } else {
         const genderChanged = newGender !== gender;
         const toneChanged = newTone !== tone;
@@ -884,7 +1037,8 @@ const App: React.FC = () => {
             setQuickReplies([]);
         }
     }
-  }, [addMessage, appState, region, gender, tone, colors, height, weight, profileImage, handleGetWeatherRecommendation]);
+  }, [addMessage, appState, region, gender, tone, colors, height, weight, profileImage, handleGetWeatherRecommendation, handleNewChat]);
+  
 
   useEffect(() => {
     const scrollTimeout = setTimeout(() => {
@@ -894,7 +1048,16 @@ const App: React.FC = () => {
     }, 100);
   
     return () => clearTimeout(scrollTimeout);
-  }, [messages]);
+  }, [currentMessages]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto'; // Reset height to recalculate
+      const scrollHeight = textarea.scrollHeight;
+      textarea.style.height = `${scrollHeight}px`;
+    }
+  }, [input]);
 
   const handleSend = useCallback(async (messageText?: string) => {
     const text = (messageText ?? input).trim();
@@ -920,21 +1083,40 @@ const App: React.FC = () => {
       const placeholderId = addMessage('assistant', '', undefined, undefined, true);
       const currentSuggestion = lastOutfitSuggestion;
       setLastOutfitSuggestion('');
+      
+      imageGenerationTracker.current = { id: placeholderId, isCancelled: false };
 
       try {
-        const imageUrl = await generateOutfitImage(currentSuggestion, gender, profileImage, height, weight);
+        const imagePromise = generateOutfitImage(currentSuggestion, gender, profileImage, height, weight);
+        
+        const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error("Timeout: 이미지 생성 시간이 초과되었어요.")), 30000)
+        );
+
+        const imageUrl = await Promise.race([imagePromise, timeoutPromise]);
+        
+        if (imageGenerationTracker.current?.id !== placeholderId || imageGenerationTracker.current?.isCancelled) {
+          return;
+        }
+
         if (imageUrl) {
-            setMessages(prev => prev.map(m => m.id === placeholderId ? {...m, text: '', generatedImage: imageUrl, loadingImage: false, imagePrompt: currentSuggestion } : m));
+            updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? {...m, text: '', generatedImage: imageUrl as string, loadingImage: false, imagePrompt: currentSuggestion } : m));
             addMessage('assistant', getImageGenerationSuccessMessage(tone));
         } else {
             const error = '이미지를 생성하지 못했습니다.';
-            setMessages(prev => prev.map(m => m.id === placeholderId ? {...m, text: getImageGenerationErrorMessage(tone, error), loadingImage: false} : m));
+            updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? {...m, text: getImageGenerationErrorMessage(tone, error), loadingImage: false} : m));
         }
       } catch (e) {
+        if (imageGenerationTracker.current?.id !== placeholderId || imageGenerationTracker.current?.isCancelled) {
+          return;
+        }
         const error = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
-        setMessages(prev => prev.map(m => m.id === placeholderId ? {...m, text: getImageGenerationErrorMessage(tone, error), loadingImage: false} : m));
+        updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? {...m, text: getImageGenerationErrorMessage(tone, error), loadingImage: false} : m));
       } finally {
         setIsLoading(false);
+        if (imageGenerationTracker.current?.id === placeholderId) {
+            imageGenerationTracker.current = null;
+        }
       }
       return;
     }
@@ -955,6 +1137,8 @@ const App: React.FC = () => {
             return;
         }
     }
+
+    const isFirstUserMessage = currentMessages.filter(m => m.role === 'user').length === 0;
     
     if (userImageURL) {
       addMessage('user', '', userImageURL);
@@ -976,8 +1160,7 @@ const App: React.FC = () => {
     try {
       if (currentImageFile) {
         const data = await getImageRecommendation(currentImageFile, text, region, gender, tone, colors, height, weight);
-        
-        setMessages(prev => prev.map(m => m.id === placeholderId ? {...m, text: data.analysis } : m));
+        updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? {...m, text: data.analysis } : m));
         
         setTimeout(() => {
             addMessage('assistant', data.suggestion);
@@ -986,20 +1169,32 @@ const App: React.FC = () => {
 
         setQuickReplies(data.quickReplies);
 
+        if (isFirstUserMessage && data.title) {
+            setChatHistory(prev => prev.map(c => 
+                c.id === currentChatId ? { ...c, title: data.title.replace(/^"|"$/g, '') } : c
+            ));
+        }
+
       } else {
         const data = await getTextRecommendation(text, region, gender, tone, colors, height, weight);
-        setMessages(prev => prev.map(m => m.id === placeholderId ? {...m, text: data.advice, generatedImage: undefined } : m));
+        updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? {...m, text: data.advice, generatedImage: undefined } : m));
         setLastOutfitSuggestion(data.advice);
         setQuickReplies(data.quickReplies);
+
+        if (isFirstUserMessage && data.title) {
+            setChatHistory(prev => prev.map(c => 
+                c.id === currentChatId ? { ...c, title: data.title.replace(/^"|"$/g, '') } : c
+            ));
+        }
       }
     } catch (e) {
       const error = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
       const errorMessage = getAnalysisErrorMessage(!!currentImageFile, tone, error);
-      setMessages(prev => prev.map(m => m.id === placeholderId ? {...m, text: errorMessage } : m));
+      updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? {...m, text: errorMessage } : m));
     } finally {
       setIsLoading(false);
     }
-  }, [input, imageFile, isLoading, region, gender, tone, colors, height, weight, addMessage, lastOutfitSuggestion, profileImage, handleGetWeatherRecommendation]);
+  }, [input, imageFile, isLoading, region, gender, tone, colors, height, weight, addMessage, lastOutfitSuggestion, profileImage, handleGetWeatherRecommendation, updateCurrentChat, currentChatId, currentMessages]);
 
   const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1010,7 +1205,7 @@ const App: React.FC = () => {
   const handleFeedback = useCallback(async (message: Message, feedback: 'like' | 'dislike' | null) => {
     const newFeedback = message.feedback === feedback ? null : feedback;
     
-    setMessages(prev =>
+    updateCurrentChat(prev =>
       prev.map(m => m.id === message.id ? { ...m, feedback: newFeedback } : m)
     );
 
@@ -1022,7 +1217,7 @@ const App: React.FC = () => {
       
       try {
         const data = await getAlternativeOutfitSuggestion(message.imagePrompt, region, gender, tone, colors, height, weight);
-        setMessages(prev => prev.map(m => 
+        updateCurrentChat(prev => prev.map(m => 
           m.id === placeholderId ? { ...m, text: data.suggestion } : m
         ));
         setLastOutfitSuggestion(data.suggestion);
@@ -1030,20 +1225,20 @@ const App: React.FC = () => {
       } catch (e) {
         const error = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
         const errorMessage = getAnalysisErrorMessage(false, tone, error);
-        setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: errorMessage } : m));
+        updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? { ...m, text: errorMessage } : m));
       } finally {
         setIsLoading(false);
       }
     }
-  }, [addMessage, region, gender, tone, colors, height, weight]);
+  }, [addMessage, region, gender, tone, colors, height, weight, updateCurrentChat]);
 
   const handleDeleteLikedImage = useCallback((messageId: number) => {
-    setMessages(prev =>
+    updateCurrentChat(prev =>
       prev.map(m =>
         m.id === messageId ? { ...m, feedback: null } : m
       )
     );
-  }, []);
+  }, [updateCurrentChat]);
 
   const handleRecommendationFromHistory = useCallback(async (images: string[], source: 'selected' | 'all') => {
     setHistoryOpen(false);
@@ -1063,11 +1258,23 @@ const App: React.FC = () => {
     
     const placeholderId = addMessage('assistant', '', undefined, undefined, true);
     
+    imageGenerationTracker.current = { id: placeholderId, isCancelled: false };
+    
     try {
-        const { imageUrl, suggestion } = await generateOutfitFromLikedImages(images, region, gender, tone, colors, height, weight, profileImage);
+        const imagePromise = generateOutfitFromLikedImages(images, region, gender, tone, colors, height, weight, profileImage);
+        
+        const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error("Timeout: 이미지 생성 시간이 초과되었어요.")), 30000)
+        );
+
+        const { imageUrl, suggestion } = await Promise.race([imagePromise, timeoutPromise]);
+
+        if (imageGenerationTracker.current?.id !== placeholderId || imageGenerationTracker.current?.isCancelled) {
+          return;
+        }
         
         if (imageUrl) {
-            setMessages(prev => prev.map(m => m.id === placeholderId ? {
+            updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? {
                 ...m,
                 text: '', 
                 generatedImage: imageUrl, 
@@ -1077,15 +1284,21 @@ const App: React.FC = () => {
             addMessage('assistant', getImageGenerationSuccessMessage(tone));
         } else {
             const error = '이미지를 생성하지 못했습니다.';
-            setMessages(prev => prev.map(m => m.id === placeholderId ? { ...m, text: getImageGenerationErrorMessage(tone, error), loadingImage: false} : m));
+            updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? { ...m, text: getImageGenerationErrorMessage(tone, error), loadingImage: false} : m));
         }
     } catch (e) {
+        if (imageGenerationTracker.current?.id !== placeholderId || imageGenerationTracker.current?.isCancelled) {
+          return;
+        }
         const error = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
-        setMessages(prev => prev.map(m => m.id === placeholderId ? {...m, text: getImageGenerationErrorMessage(tone, error), loadingImage: false} : m));
+        updateCurrentChat(prev => prev.map(m => m.id === placeholderId ? {...m, text: getImageGenerationErrorMessage(tone, error), loadingImage: false} : m));
     } finally {
         setIsLoading(false);
+        if (imageGenerationTracker.current?.id === placeholderId) {
+            imageGenerationTracker.current = null;
+        }
     }
-  }, [addMessage, region, gender, tone, colors, height, weight, profileImage]);
+  }, [addMessage, region, gender, tone, colors, height, weight, profileImage, updateCurrentChat]);
 
   const handleAddImageToHistory = useCallback(async (file: File) => {
     try {
@@ -1099,31 +1312,51 @@ const App: React.FC = () => {
             feedback: 'like',
             historyOnly: true,
         };
-        setMessages(prev => [...prev, newMessage]);
+        updateCurrentChat(prev => [...prev, newMessage]);
     } catch (error) {
         console.error("Error adding image to history:", error);
         addMessage('assistant', '이미지를 내코디에 추가하는 데 실패했습니다.');
     }
-  }, [getNewMessageId, addMessage]);
+  }, [getNewMessageId, addMessage, updateCurrentChat]);
 
   const handleRequestPermission = useCallback((type: 'location', onConfirm: () => void) => {
     setPermissionRequest({ type, onConfirm });
   }, []);
   
-  const resetApp = useCallback(() => {
+  const handleSelectChat = useCallback((id: string) => {
+    if (id !== currentChatId) {
+      setCurrentChatId(id);
+      setIsSidebarOpen(false);
+      setQuickReplies([]);
+    }
+  }, [currentChatId]);
+  
+  const handleDeleteChat = useCallback((idToDelete: string) => {
+    setChatHistory(prev => {
+      const newHistory = prev.filter(c => c.id !== idToDelete);
+      if (currentChatId === idToDelete) {
+        if (newHistory.length > 0) {
+          setCurrentChatId(newHistory[0].id);
+        } else {
+          setCurrentChatId(null);
+        }
+      }
+      return newHistory;
+    });
+  }, [currentChatId]);
+
+  const handleGoToHome = useCallback(() => {
     setAppState('landing');
-    setMessages([]);
-    setInput('');
-    setQuickReplies([]);
-    setRegion('');
-    setGender('');
-    setTone('friendly');
-    setColors([]);
-    setLastOutfitSuggestion('');
-    setProfileImage(null);
-    setHeight('');
-    setWeight('');
-    messageIdCounter.current = 0;
+    setIsSidebarOpen(false);
+  }, []);
+  
+  const startNewSession = useCallback(() => {
+    localStorage.removeItem('wearlyChatHistory');
+    localStorage.removeItem('wearlyCurrentChatId');
+    setChatHistory([]);
+    setCurrentChatId(null);
+    setWelcomeMessageSent(false);
+    setSettingsOpen(true);
   }, []);
 
   const permissionDetails = {
@@ -1137,15 +1370,32 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-purple-50 to-pink-100 sm:p-4 dark:from-gray-900 dark:via-purple-900/50 dark:to-black">
       {appState === 'landing' ? (
-        <LandingPage onStart={() => setSettingsOpen(true)} />
+        <LandingPage onStart={startNewSession} />
       ) : (
+      <>
+      <ChatHistorySidebar 
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        history={chatHistory}
+        currentId={currentChatId}
+        onNewChat={handleNewChat}
+        onSelectChat={handleSelectChat}
+        onDeleteChat={handleDeleteChat}
+        onGoToHome={handleGoToHome}
+      />
       <div className="flex flex-col w-full h-full max-w-3xl sm:rounded-2xl shadow-2xl overflow-hidden bg-white/80 backdrop-blur-lg border border-gray-200 dark:bg-gray-800/80 dark:border-gray-700">
         {/* Header */}
         <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-gray-200/80 shrink-0 dark:border-gray-700/80">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-2xl shadow-lg shrink-0">
-                W
-            </div>
+            <button 
+                onClick={() => setIsSidebarOpen(true)}
+                className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 transition-colors dark:hover:bg-gray-700"
+                aria-label="채팅 기록 열기"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+            </button>
             <div>
               <h1 className="text-lg font-bold text-gray-800 dark:text-gray-100">웨어리</h1>
               <p className="text-sm text-gray-500 dark:text-gray-400">나만의 AI 코디네이터</p>
@@ -1164,12 +1414,15 @@ const App: React.FC = () => {
               className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 transition-colors dark:hover:bg-gray-700"
               aria-label="설정"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
             </button>
             <button 
-              onClick={resetApp} 
+              onClick={handleNewChat} 
               className="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-100 transition-colors dark:hover:bg-gray-700"
-              aria-label="새로고침"
+              aria-label="새 채팅"
             >
                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="23 4 23 10 17 10" />
@@ -1183,8 +1436,15 @@ const App: React.FC = () => {
 
         {/* Chat Area */}
         <main ref={chatListRef} className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-white/50 to-transparent dark:from-gray-800/50 dark:to-transparent no-scrollbar">
+          {currentChat && (
+            <div className="flex justify-center mb-4">
+              <span className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm px-3 py-1 rounded-full">
+                {new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' }).format(currentChat.createdAt)}
+              </span>
+            </div>
+          )}
           <div className="flex flex-col gap-5">
-            {messages.filter(m => !m.historyOnly).map((m) => (
+            {currentMessages.filter(m => !m.historyOnly).map((m) => (
               <div key={m.id} className={`flex items-end gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`
                   ${(m.image || m.generatedImage || m.loadingImage) ? 'p-1' : 'p-2'}
@@ -1195,15 +1455,25 @@ const App: React.FC = () => {
                       : 'bg-white border border-gray-200 text-gray-800 rounded-bl-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100'
                   } shadow-md`}>
                   {m.loadingImage && (
-                    <div className="w-full aspect-square bg-gray-200 rounded-lg animate-pulse flex items-center justify-center p-1">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
+                    <div className="w-full aspect-square bg-gray-200 dark:bg-gray-600 rounded-lg flex flex-col items-center justify-center p-4 text-center">
+                        <div className="w-10 h-10 border-4 border-purple-300 dark:border-purple-600 border-t-purple-600 dark:border-t-purple-300 rounded-full animate-spin mb-4"></div>
+                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">{getImageGenerationPlaceholderMessage(tone)}</p>
+                        <button
+                            onClick={() => handleCancelImageGeneration(m.id)}
+                            className="px-4 py-1.5 rounded-xl bg-white border border-gray-300 hover:bg-gray-100 text-sm font-medium transition-all dark:bg-gray-700/80 dark:border-gray-500 dark:text-gray-200 dark:hover:bg-gray-700"
+                        >
+                            중지
+                        </button>
                     </div>
                   )}
                   {m.image && (
                     <div className="relative w-40 p-1">
-                        <img src={m.image} alt="uploaded content" className="w-full h-auto rounded-lg object-cover" />
+                        <img 
+                            src={m.image} 
+                            alt="uploaded content" 
+                            className="w-full h-auto rounded-lg object-cover cursor-pointer"
+                            onClick={() => setZoomedImageUrl(m.image!)}
+                        />
                         {m.role === 'user' && (
                             <button
                             onClick={() => handleFeedback(m, 'like')}
@@ -1215,33 +1485,38 @@ const App: React.FC = () => {
                             aria-label={m.feedback === 'like' ? '저장 취소' : '내코디에 저장'}
                             >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                <path fillRule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clipRule="evenodd" />
+                              <path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" />
                             </svg>
                             </button>
                         )}
                     </div>
                   )}
                   {m.generatedImage && 
-                    <div className="relative p-1">
-                        <img src={m.generatedImage} alt="AI generated outfit" className="w-full h-auto rounded-lg object-cover" />
+                    <div className="relative p-1 w-64">
+                        <img 
+                            src={m.generatedImage} 
+                            alt="AI generated outfit" 
+                            className="w-full h-auto rounded-lg object-cover cursor-pointer"
+                            onClick={() => setZoomedImageUrl(m.generatedImage!)}
+                        />
                           {m.role === 'assistant' && (
-                            <div className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full p-1">
+                            <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
                                 <button 
                                     onClick={() => handleFeedback(m, 'like')}
-                                    className={`p-1.5 rounded-full transition-colors text-white ${m.feedback === 'like' ? 'bg-red-500' : 'hover:bg-white/20'}`}
+                                    className={`p-1.5 rounded-full transition-all text-white ${m.feedback === 'like' ? 'bg-red-500 scale-110 shadow-lg' : 'bg-black/40 backdrop-blur-sm hover:bg-red-400'}`}
                                     aria-label="좋아요"
                                 >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clipRule="evenodd" />
+                                  <path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" />
                                 </svg>
                                 </button>
                                 <button 
                                     onClick={() => handleFeedback(m, 'dislike')} 
-                                    className={`p-1.5 rounded-full transition-colors text-white ${m.feedback === 'dislike' ? 'bg-blue-500' : 'hover:bg-white/20'}`}
+                                    className={`p-1.5 rounded-full transition-all text-white ${m.feedback === 'dislike' ? 'bg-blue-500 scale-110 shadow-lg' : 'bg-black/40 backdrop-blur-sm hover:bg-blue-400'}`}
                                     aria-label="싫어요"
                                 >
-                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.41 2 8.5c0 3.77 3.4 6.86 8.55 11.53L12 21.35l1.45-1.32C18.6 13.36 22 10.27 22 8.5 22 5.41 19.58 3 16.5 3zM12.5 13.1l-2.1 2.1-1.4-1.4 2.1-2.1-2.1-2.1 1.4-1.4 2.1 2.1 2.1-2.1 1.4 1.4-2.1 2.1 2.1 2.1-1.4 1.4-2.1-2.1z"/>
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M18 9.5a1.5 1.5 0 11-3 0v-6a1.5 1.5 0 013 0v6zM14 9.667v-5.43a2 2 0 00-1.106-1.79l-.05-.025A4 4 0 0011.057 2H5.642a2 2 0 00-1.962 1.608l-1.2 6A2 2 0 004.44 12H8v4a2 2 0 002 2 1 1 0 001-1v-.667a4 4 0 01.8-2.4l2.4-4.867a4 4 0 00.8-2.4z" />
                                   </svg>
                                 </button>
                             </div>
@@ -1252,7 +1527,7 @@ const App: React.FC = () => {
                 </div>
               </div>
             ))}
-            {isLoading && !messages[messages.length-1]?.loadingImage && (
+            {isLoading && !currentMessages[currentMessages.length-1]?.loadingImage && (
               <div className="flex items-end gap-2 justify-start">
                   <div className="p-4 max-w-[85%] md:max-w-[75%] rounded-2xl bg-white border border-gray-200 text-gray-800 rounded-bl-lg shadow-md dark:bg-gray-700 dark:border-gray-600">
                       <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
@@ -1292,35 +1567,39 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          <div className="px-6 py-4 border-t border-gray-200/80 bg-white/80 dark:border-gray-700/80 dark:bg-gray-800/80">
-            <div className="flex gap-3 items-end">
-              <label className="cursor-pointer h-12 w-12 flex items-center justify-center rounded-xl hover:bg-gray-100 transition-colors dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-purple-600 dark:text-purple-400 font-medium shrink-0">
+          <div className="px-4 py-3 border-t border-gray-200/80 bg-white/80 dark:border-gray-700/80 dark:bg-gray-800/80">
+            <div className="flex items-end gap-2 bg-gray-100 dark:bg-gray-700/50 rounded-2xl p-2">
+              <label className="p-2.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors shrink-0 cursor-pointer">
                 <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} disabled={isLoading} />
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
               </label>
               <textarea
+                ref={textareaRef}
                 rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="오늘 뭐 입을지 물어보세요..."
-                className="flex-1 resize-none p-3 h-12 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-400 transition dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 dark:focus:ring-purple-500"
+                className="flex-1 resize-none bg-transparent py-2.5 px-1.5 focus:outline-none dark:text-white dark:placeholder-gray-400 max-h-28 no-scrollbar"
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                 disabled={isLoading}
               />
               <button 
                 onClick={() => handleSend()} 
                 disabled={isLoading || (!input && !imageFile)} 
-                className="px-5 h-12 rounded-xl bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 text-white font-semibold shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shrink-0 border-2 border-white/20"
+                className="w-11 h-11 flex items-center justify-center rounded-full text-white font-semibold shadow-lg transition-all disabled:bg-gray-400 disabled:shadow-none disabled:cursor-not-allowed shrink-0 enabled:bg-gradient-to-br enabled:from-blue-500 enabled:via-purple-500 enabled:to-pink-500 enabled:hover:shadow-xl dark:disabled:bg-gray-500"
                 aria-label="Send message"
               >
-                전송
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                </svg>
               </button>
             </div>
           </div>
         </footer>
       </div>
+      </>
       )}
       {settingsOpen && <SettingsModal 
         currentRegion={region} 
@@ -1334,7 +1613,7 @@ const App: React.FC = () => {
         onApply={handleSettingsApply} 
         onRequestPermission={handleRequestPermission}
       />}
-      {historyOpen && <HistoryModal messages={messages} onClose={() => setHistoryOpen(false)} onDelete={handleDeleteLikedImage} onRecommendFromSelected={(images) => handleRecommendationFromHistory(images, 'selected')} onRecommendFromAll={(images) => handleRecommendationFromHistory(images, 'all')} onImageClick={setZoomedImageUrl} onAddImage={handleAddImageToHistory} />}
+      {historyOpen && <HistoryModal messages={currentMessages} onClose={() => setHistoryOpen(false)} onDelete={handleDeleteLikedImage} onRecommendFromSelected={(images) => handleRecommendationFromHistory(images, 'selected')} onRecommendFromAll={(images) => handleRecommendationFromHistory(images, 'all')} onImageClick={setZoomedImageUrl} onAddImage={handleAddImageToHistory} />}
       {zoomedImageUrl && <ImageZoomModal imageUrl={zoomedImageUrl} onClose={() => setZoomedImageUrl(null)} />}
       {permissionRequest && (
         <PermissionModal

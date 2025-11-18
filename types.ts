@@ -13,3 +13,10 @@ export interface Message {
 export type Gender = 'male' | 'female' | '';
 
 export type Tone = 'critical' | 'witty' | 'friendly' | '';
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+}
